@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coherence Field Full</title>
+
+<style>
+body{margin:0;overflow:hidden;background:#050812;color:#fff;font-family:sans-serif}
+canvas{display:block}
+
+/* ミニマップ */
+#mini{
+  position:absolute;
+  top:10px;
+  right:10px;
+  width:120px;
+  height:120px;
+  background:rgba(0,0,0,0.5);
+  border-radius:10px;
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="c"></canvas>
+<canvas id="mini"></canvas>
+
+<script>
+
+// ================== 基本 ==================
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+
+const mini=document.getElementById("mini");
+const mctx=mini.getContext("2d");
+
+let W,H;
+
+function resize(){
+  let dpr=window.devicePixelRatio||1;
+
+  W=window.innerWidth;
+  H=window.innerHeight;
+
+  canvas.width=W*dpr;
+  canvas.height=H*dpr;
+
+  canvas.style.width=W+"px";
+  canvas.style.height=H+"px";
+
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+window.onresize=resize;
+resize();
+
+// ================== ビュー（カメラ） ==================
+let view={
+  scale:1,
+  offsetX:0,
+  offsetY:0
+};
+
+// ================== 粒子 ==================
+let N=80;
+let agents=[];
+
+function init(){
+  agents=[];
+  for(let i=0;i<N;i++){
+    agents.push({
+      x:Math.random()*W,
+      y:Math.random()*H,
+      vx:(Math.random()-0.5)*2,
+      vy:(Math.random()-0.5)*2
+    });
+  }
+}
+
+init();
+
+// ================== 更新 ==================
+function update(){
+  for(let a of agents){
+    a.x+=a.vx;
+    a.y+=a.vy;
+
+    if(a.x<0||a.x>W) a.vx*=-1;
+    if(a.y<0||a.y>H) a.vy*=-1;
+  }
+}
+
+// ================== 描画 ==================
+function draw(){
+
+  // クリア
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // カメラ適用
+  ctx.setTransform(view.scale,0,0,view.scale,view.offsetX,view.offsetY);
+
+  // 粒子
+  for(let a of agents){
+    ctx.beginPath();
+    ctx.arc(a.x,a.y,6,0,Math.PI*2);
+    ctx.fillStyle="#64d2ff";
+    ctx.fill();
+  }
+
+  drawMini();
+}
+
+// ================== ミニマップ ==================
+function drawMini(){
+
+  let mw=mini.width;
+  let mh=mini.height;
+
+  mctx.clearRect(0,0,mw,mh);
+
+  let sx=mw/W;
+  let sy=mh/H;
+
+  // 粒子
+  for(let a of agents){
+    mctx.fillStyle="#64d2ff";
+    mctx.fillRect(a.x*sx,a.y*sy,2,2);
+  }
+
+  // ビュー枠
+  let vw=W/view.scale;
+  let vh=H/view.scale;
+
+  let vx=-view.offsetX/view.scale;
+  let vy=-view.offsetY/view.scale;
+
+  mctx.strokeStyle="white";
+  mctx.strokeRect(vx*sx,vy*sy,vw*sx,vh*sy);
+}
+
+// ================== ピンチズーム ==================
+let pinch={
+  active:false,
+  startDist:0,
+  startScale:1
+};
+
+canvas.addEventListener("touchstart",e=>{
+  if(e.touches.length===2){
+    pinch.active=true;
+
+    let dx=e.touches[0].clientX-e.touches[1].clientX;
+    let dy=e.touches[0].clientY-e.touches[1].clientY;
+
+    pinch.startDist=Math.hypot(dx,dy);
+    pinch.startScale=view.scale;
+  }
+},{passive:true});
+
+canvas.addEventListener("touchmove",e=>{
+  if(pinch.active && e.touches.length===2){
+
+    let dx=e.touches[0].clientX-e.touches[1].clientX;
+    let dy=e.touches[0].clientY-e.touches[1].clientY;
+
+    let dist=Math.hypot(dx,dy);
+    let newScale=pinch.startScale*(dist/pinch.startDist);
+
+    let rect=canvas.getBoundingClientRect();
+
+    let cx=(e.touches[0].clientX+e.touches[1].clientX)/2-rect.left;
+    let cy=(e.touches[0].clientY+e.touches[1].clientY)/2-rect.top;
+
+    view.offsetX = cx - (cx - view.offsetX) * (newScale / view.scale);
+    view.offsetY = cy - (cy - view.offsetY) * (newScale / view.scale);
+
+    view.scale=Math.max(0.5,Math.min(4,newScale));
+  }
+},{passive:true});
+
+canvas.addEventListener("touchend",()=>{
+  pinch.active=false;
+});
+
+// ================== ミニマップタップ ==================
+mini.addEventListener("touchstart",e=>{
+
+  let rect=mini.getBoundingClientRect();
+
+  let x=e.touches[0].clientX-rect.left;
+  let y=e.touches[0].clientY-rect.top;
+
+  let nx=x/rect.width;
+  let ny=y/rect.height;
+
+  view.offsetX = -nx * W * view.scale + W/2;
+  view.offsetY = -ny * H * view.scale + H/2;
+
+});
+
+// ================== ループ ==================
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+</body>
+</html>
