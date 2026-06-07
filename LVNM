@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Embodied Field Kernel Simulator</title>
+<style>
+body { background:#000; color:#0f0; font-family:monospace; }
+canvas { border:1px solid #0f0; }
+.controls { margin-top:10px; }
+</style>
+</head>
+<body>
+
+<canvas id="c" width="800" height="600"></canvas>
+
+<div class="controls">
+<input type="file" id="file">
+<button onclick="mode='fold'">FOLD MODE</button>
+<button onclick="mode='free'">FREE MODE</button>
+</div>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+const W=800, Hh=600;
+const N = 1000;
+let particles = [];
+let H = new Float32Array(W*Hh);
+
+let dasData = null;
+let mode = "fold";
+
+for(let i=0;i<N;i++){
+    particles.push({
+        x:Math.random()*W,
+        y:Math.random()*Hh,
+        vx:0, vy:0,
+        z:Math.random()
+    });
+}
+
+function idx(x,y){
+    x|=0; y|=0;
+    if(x<0||x>=W||y<0||y>=Hh) return 0;
+    return y*W + x;
+}
+
+// ===== DAS INPUT =====
+document.getElementById("file").onchange = e=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+        dasData = reader.result.split("\n").map(v=>parseFloat(v));
+        console.log("DAS loaded", dasData.length);
+    };
+    reader.readAsText(e.target.files[0]);
+};
+
+function envSignal(z){
+    if(dasData){
+        let i = Math.floor(z * dasData.length) % dasData.length;
+        return dasData[i]*0.1;
+    }
+    return Math.sin(z*10)*0.5;
+}
+
+// ===== TIME =====
+function timeSignal(z){
+    return Math.sin(z*6.28);
+}
+
+// ===== LLM FIELD =====
+function llmField(x,y){
+
+    if(mode==="fold"){
+        // folding field
+        let cx = W/2;
+        let cy = Hh/2;
+
+        let dx = cx-x;
+        let dy = cy-y;
+
+        // fold left/right
+        let side = (x < cx) ? 1 : -1;
+        return {
+            fx: dx*0.01 + side*0.5,
+            fy: dy*0.01
+        };
+    }
+
+    return {
+        fx: 0,
+        fy: 0
+    };
+}
+
+// ===== BIOLOGICALNESS =====
+function computeB(){
+    let vavg=0;
+    for(let p of particles){
+        vavg += Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+    }
+    vavg/=N;
+    return vavg;
+}
+
+// ===== CLUSTERING =====
+function clusters(){
+    const radius = 25;
+    let groups=[];
+
+    for(let p of particles){
+        let found=false;
+
+        for(let g of groups){
+            let dx=p.x-g.cx;
+            let dy=p.y-g.cy;
+            if(dx*dx+dy*dy < radius*radius){
+                g.members.push(p);
+                g.cx = (g.cx*g.count + p.x)/(g.count+1);
+                g.cy = (g.cy*g.count + p.y)/(g.count+1);
+                g.count++;
+                found=true;
+                break;
+            }
+        }
+
+        if(!found){
+            groups.push({cx:p.x,cy:p.y,count:1,members:[p]});
+        }
+    }
+    return groups;
+}
+
+// ===== STEP =====
+function step(){
+    let B = computeB();
+
+    for(let p of particles){
+
+        let lf = llmField(p.x,p.y);
+        let env = envSignal(p.z);
+        let t = timeSignal(p.z);
+        let h = H[idx(p.x,p.y)];
+
+        let speed = Math.sqrt(p.vx*p.vx+p.vy*p.vy);
+        let tau = 5 + speed*5 + Math.abs(env)*5 + B*10;
+
+        let fx = lf.fx + env + t + h*0.2;
+        let fy = lf.fy + env + t + h*0.2;
+
+        fx += B*(Math.random()-0.5);
+        fy += B*(Math.random()-0.5);
+
+        p.vx += fx*0.1;
+        p.vy += fy*0.1;
+
+        p.vx *= 0.97;
+        p.vy *= 0.97;
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if(p.x<0)p.x+=W;
+        if(p.y<0)p.y+=Hh;
+        if(p.x>W)p.x-=W;
+        if(p.y>Hh)p.y-=Hh;
+
+        p.z += 0.01 + speed*0.01;
+        p.z %= 1;
+
+        let id = idx(p.x,p.y);
+        H[id] += 1;
+        H[id] -= H[id]/tau;
+    }
+
+    for(let i=0;i<H.length;i++){
+        H[i]*=0.995;
+    }
+}
+
+// ===== DRAW =====
+function draw(){
+
+    // heatmap
+    let img = ctx.getImageData(0,0,W,Hh);
+    for(let i=0;i<H.length;i++){
+        let val = H[i]*3;
+        img.data[i*4+0] = val;
+        img.data[i*4+1] = 0;
+        img.data[i*4+2] = val*0.2;
+        img.data[i*4+3] = 255;
+    }
+    ctx.putImageData(img,0,0);
+
+    // particles
+    ctx.fillStyle="#00ff88";
+    for(let p of particles){
+        ctx.fillRect(p.x,p.y,2,2);
+    }
+
+    // clusters (robot body)
+    let cs = clusters();
+    ctx.strokeStyle="#ffff00";
+    ctx.fillStyle="#ffff00";
+
+    for(let c of cs){
+        ctx.beginPath();
+        ctx.arc(c.cx,c.cy,5,0,Math.PI*2);
+        ctx.fill();
+    }
+
+    // connections (simple chain)
+    for(let i=0;i<cs.length-1;i++){
+        ctx.beginPath();
+        ctx.moveTo(cs[i].cx,cs[i].cy);
+        ctx.lineTo(cs[i+1].cx,cs[i+1].cy);
+        ctx.stroke();
+    }
+}
+
+function loop(){
+    step();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+
+</body>
+</html>
