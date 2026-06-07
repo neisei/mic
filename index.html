@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Mic Test</title>
+</head>
+<body>
+
+<h1>マイクテスト</h1>
+<button onclick="start()">開始</button>
+<p id="v">---</p>
+
+<script>
+async function start(){
+  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  src.connect(analyser);
+
+  const data = new Uint8Array(analyser.frequencyBinCount);
+
+  function loop(){
+    analyser.getByteFrequencyData(data);
+    let vol = data.reduce((a,b)=>a+b)/data.length;
+    document.getElementById("v").textContent = vol.toFixed(1);
+    requestAnimationFrame(loop);
+  }
+  loop();
+}
+</script>
+
+</body>
+</html>
